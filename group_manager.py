@@ -1,7 +1,7 @@
 """
 group_manager.py
 グループ情報をJSONファイルで管理するクラス。
-保存先: C:\Users\hasse\Outlook_Calendar_Manage\data\groups.json
+保存先: C:/Users/hasse/Outlook_Calendar_Manage/data/groups.json
 """
 
 import json
