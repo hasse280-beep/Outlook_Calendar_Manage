@@ -1,18 +1,25 @@
 """
 group_manager.py
 グループ情報をJSONファイルで管理するクラス。
-保存先: C:/Users/hasse/Outlook_Calendar_Manage/data/groups.json
+保存先: <exeまたはスクリプトと同じディレクトリ>/data/groups.json
 """
 
 import json
 import logging
-import os
+import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+def _get_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent
+
+
 # グループ情報を保存するJSONファイルのパス
-GROUPS_FILE_PATH = Path(r"C:\Users\hasse\Outlook_Calendar_Manage\data\groups.json")
+GROUPS_FILE_PATH = _get_base_dir() / "data" / "groups.json"
 
 
 class GroupManager:
