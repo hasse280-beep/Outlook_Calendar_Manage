@@ -64,18 +64,23 @@ class CalendarFetcher:
             return []
 
         try:
-            # 受信者オブジェクトを作成して名前解決
-            recipient = namespace.CreateRecipient(email)
+            # メールがある場合はメールで、ない場合は表示名で受信者解決を試みる
+            lookup = email if email else display_name
+            if not lookup:
+                logger.warning("メールアドレスも表示名も空のため取得をスキップします。")
+                return []
+
+            recipient = namespace.CreateRecipient(lookup)
             resolved = recipient.Resolve()
             if not resolved:
-                logger.warning("受信者の名前解決に失敗しました: %s", email)
+                logger.warning("受信者の名前解決に失敗しました: %s", lookup)
                 return []
 
             # 共有カレンダーフォルダを取得
             calendar_folder = namespace.GetSharedDefaultFolder(recipient, OL_FOLDER_CALENDAR)
 
         except Exception as e:
-            logger.error("共有カレンダーフォルダの取得に失敗しました（権限なし等）: %s / エラー: %s", email, e)
+            logger.error("共有カレンダーフォルダの取得に失敗しました（権限なし等）: %s / エラー: %s", email or display_name, e)
             return []
 
         try:

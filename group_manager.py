@@ -171,18 +171,24 @@ class GroupManager:
             return False
 
         new_email = (contact.get("email") or "").lower()
-        if not new_email:
-            logger.warning("連絡先のメールアドレスが空です。")
-            return False
+        new_name = (contact.get("name") or "").lower()
 
-        # 重複チェック（メールアドレスで判定、大文字小文字無視）
-        existing_emails = {c.get("email", "").lower() for c in groups[group_name]}
-        if new_email in existing_emails:
-            logger.warning(
-                "メールアドレス '%s' はグループ '%s' に既に存在します。",
-                new_email, group_name,
-            )
-            return False
+        # 重複チェック（メールが空の場合は名前で判定）
+        for c in groups[group_name]:
+            c_email = (c.get("email") or "").lower()
+            c_name = (c.get("name") or "").lower()
+            if new_email and c_email and new_email == c_email:
+                logger.warning(
+                    "メールアドレス '%s' はグループ '%s' に既に存在します。",
+                    new_email, group_name,
+                )
+                return False
+            if not new_email and not c_email and new_name and new_name == c_name:
+                logger.warning(
+                    "連絡先 '%s' はグループ '%s' に既に存在します（メール未設定）。",
+                    new_name, group_name,
+                )
+                return False
 
         # 保存するフィールドを正規化
         normalized = {

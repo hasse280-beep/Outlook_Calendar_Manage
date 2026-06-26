@@ -13,6 +13,13 @@ _COLOR_PALETTE = [
     "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC",
 ]
 
+# 検索フィールドの選択肢
+_SEARCH_FIELDS = ["全体", "名前", "所属", "メール"]
+_FIELD_KEYS = {"全体": "all", "名前": "name", "所属": "org", "メール": "email"}
+
+# 表示列の選択肢
+_DISPLAY_COLS = ["名前", "所属", "メール"]
+
 
 class SearchPanel(tk.Frame):
     """
@@ -32,11 +39,13 @@ class SearchPanel(tk.Frame):
         self._active_contacts: list = []
         self._color_index = 0
 
-        # デバウンス用タイマーID
-        self._debounce_id = None
-
         # 検索結果キャッシュ
         self._search_results: list = []
+
+        # 表示列チェックボックス変数
+        self._display_vars: dict[str, tk.BooleanVar] = {
+            col: tk.BooleanVar(value=True) for col in _DISPLAY_COLS
+        }
 
         self._build_ui()
         self._load_groups()
@@ -52,10 +61,40 @@ class SearchPanel(tk.Frame):
         search_frame = ttk.LabelFrame(self, text="連絡先検索", padding=4)
         search_frame.pack(fill=tk.X, padx=4, pady=4)
 
+        # 検索フィールド選択
+        field_row = tk.Frame(search_frame)
+        field_row.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(field_row, text="検索対象:").pack(side=tk.LEFT)
+        self._field_var = tk.StringVar(value="全体")
+        field_combo = ttk.Combobox(
+            field_row,
+            textvariable=self._field_var,
+            values=_SEARCH_FIELDS,
+            state="readonly",
+            width=8,
+        )
+        field_combo.pack(side=tk.LEFT, padx=4)
+
+        # 検索ボックス + 検索ボタン
+        entry_row = tk.Frame(search_frame)
+        entry_row.pack(fill=tk.X, pady=(0, 2))
         self._search_var = tk.StringVar()
-        self._search_var.trace_add("write", self._on_search_text_changed)
-        search_entry = tk.Entry(search_frame, textvariable=self._search_var)
-        search_entry.pack(fill=tk.X, padx=2, pady=2)
+        search_entry = tk.Entry(entry_row, textvariable=self._search_var)
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+        search_entry.bind("<Return>", lambda _: self._do_search())
+        tk.Button(entry_row, text="検索", command=self._do_search, width=5).pack(side=tk.LEFT)
+
+        # 表示列チェックボックス
+        disp_row = tk.Frame(search_frame)
+        disp_row.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(disp_row, text="表示:").pack(side=tk.LEFT)
+        for col in _DISPLAY_COLS:
+            tk.Checkbutton(
+                disp_row,
+                text=col,
+                variable=self._display_vars[col],
+                command=self._refresh_result_listbox,
+            ).pack(side=tk.LEFT)
 
         # 検索結果 Listbox
         result_frame = tk.Frame(search_frame)
@@ -161,14 +200,8 @@ class SearchPanel(tk.Frame):
     # 検索
     # ------------------------------------------------------------------
 
-    def _on_search_text_changed(self, *_):
-        """テキスト変更時にデバウンス付きで検索を実行する。"""
-        if self._debounce_id is not None:
-            self.after_cancel(self._debounce_id)
-        self._debounce_id = self.after(300, self._do_search)
-
     def _do_search(self):
-        """実際の検索処理。"""
+        """検索ボタン押下 / Enterキーによる検索処理。"""
         query = self._search_var.get().strip()
         self._result_listbox.delete(0, tk.END)
         self._search_results = []
@@ -176,22 +209,38 @@ class SearchPanel(tk.Frame):
         if not query:
             return
 
+        field_label = self._field_var.get()
+        field = _FIELD_KEYS.get(field_label, "all")
+
         try:
-            results = self._searcher.search(query)
+            results = self._searcher.search(query, field)
         except Exception as e:
             messagebox.showerror("検索エラー", str(e))
             return
 
         self._search_results = results
-        for contact in results:
-            name = contact.get("name", "")
-            email = contact.get("email", "")
+        self._refresh_result_listbox()
+
+    def _format_contact_display(self, contact: dict) -> str:
+        """表示列チェックボックスに従って連絡先の表示文字列を生成する。"""
+        parts = []
+        if self._display_vars["名前"].get():
+            parts.append(contact.get("name", ""))
+        if self._display_vars["所属"].get():
             org = contact.get("organization", "")
             if org:
-                display = f"{name} ({org})"
-            else:
-                display = f"{name} <{email}>"
-            self._result_listbox.insert(tk.END, display)
+                parts.append(f"({org})")
+        if self._display_vars["メール"].get():
+            email = contact.get("email", "")
+            if email:
+                parts.append(f"<{email}>")
+        return " ".join(p for p in parts if p)
+
+    def _refresh_result_listbox(self):
+        """検索結果リストを表示列チェックボックスに従って再描画する。"""
+        self._result_listbox.delete(0, tk.END)
+        for contact in self._search_results:
+            self._result_listbox.insert(tk.END, self._format_contact_display(contact))
 
     # ------------------------------------------------------------------
     # 表示中連絡先の操作
@@ -210,12 +259,17 @@ class SearchPanel(tk.Frame):
     def _add_contact_to_active(self, contact: dict):
         """
         連絡先を表示中リストに追加する。
-        重複（email が同じ）は無視する。
+        メールが同じ（メールなしの場合は名前が同じ）連絡先は重複として無視する。
         """
         email = contact.get("email", "")
+        name = contact.get("name", "")
         for c in self._active_contacts:
-            if c.get("email") == email:
-                messagebox.showinfo("情報", f"{contact.get('name')} はすでに追加されています。")
+            c_email = c.get("email", "")
+            if email and c_email and email == c_email:
+                messagebox.showinfo("情報", f"{name} はすでに追加されています。")
+                return
+            if not email and not c_email and name and name == c.get("name", ""):
+                messagebox.showinfo("情報", f"{name} はすでに追加されています。")
                 return
 
         color = _COLOR_PALETTE[self._color_index % len(_COLOR_PALETTE)]
@@ -234,7 +288,10 @@ class SearchPanel(tk.Frame):
             name = contact.get("name", "")
             email = contact.get("email", "")
             color = contact.get("color", "#000000")
-            self._active_listbox.insert(tk.END, f"  {name} <{email}>")
+            if email:
+                self._active_listbox.insert(tk.END, f"  {name} <{email}>")
+            else:
+                self._active_listbox.insert(tk.END, f"  {name}")
             self._active_listbox.itemconfigure(i, foreground=color)
 
     def _notify_contacts_changed(self):
@@ -402,7 +459,7 @@ class SearchPanel(tk.Frame):
                 f"{contact.get('name')} をグループ「{group_name}」に追加しました。",
             )
         else:
-            messagebox.showerror("エラー", "グループへの追加に失敗しました。")
+            messagebox.showerror("エラー", "グループへの追加に失敗しました（既に存在する可能性があります）。")
 
     def _show_group_context_menu(self, event):
         """グループ Listbox の右クリックメニューを表示する。"""

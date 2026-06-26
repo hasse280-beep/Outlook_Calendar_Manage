@@ -31,13 +31,14 @@ class ContactSearcher:
         """
         self._connector = connector
 
-    def search(self, query: str) -> list:
+    def search(self, query: str, field: str = "all") -> list:
         """
         GALおよび個人連絡先からqueryに部分一致する連絡先を検索する。
         大文字小文字は区別しない。
 
         Args:
             query: 検索キーワード（空文字の場合は空リストを返す）
+            field: 検索対象フィールド。"all"(全体), "name"(名前), "org"(所属), "email"(メール)
 
         Returns:
             list[dict]: 最大50件の連絡先情報リスト。
@@ -51,36 +52,52 @@ class ContactSearcher:
 
         # GAL検索
         try:
-            results.extend(self._search_gal(query_lower))
+            results.extend(self._search_gal(query_lower, field))
         except Exception as e:
             logger.error("GAL検索中にエラーが発生しました: %s", e)
 
         # 個人連絡先フォルダ検索（上限に達していない場合のみ）
         if len(results) < RESULT_LIMIT:
             try:
-                results.extend(self._search_personal_contacts(query_lower))
+                results.extend(self._search_personal_contacts(query_lower, field))
             except Exception as e:
                 logger.error("個人連絡先検索中にエラーが発生しました: %s", e)
 
-        # 重複メールアドレスを除去しつつ上限を適用
-        seen_emails = set()
+        # 重複を除去しつつ上限を適用（メールが空の場合は名前で識別）
+        seen_keys = set()
         unique_results = []
         for contact in results:
-            email_key = contact["email"].lower()
-            if email_key not in seen_emails:
-                seen_emails.add(email_key)
+            email = contact["email"].lower()
+            key = email if email else f"__name__{contact['name'].lower()}"
+            if key not in seen_keys:
+                seen_keys.add(key)
                 unique_results.append(contact)
             if len(unique_results) >= RESULT_LIMIT:
                 break
 
         return unique_results
 
-    def _search_gal(self, query_lower: str) -> list:
+    @staticmethod
+    def _matches(query_lower: str, field: str, name: str, email: str, org: str) -> bool:
+        """指定フィールドでqueryに一致するか判定する。"""
+        if field == "name":
+            return query_lower in name.lower()
+        if field == "org":
+            return query_lower in org.lower()
+        if field == "email":
+            return query_lower in email.lower()
+        # "all": いずれかに一致
+        return (query_lower in name.lower()
+                or query_lower in email.lower()
+                or query_lower in org.lower())
+
+    def _search_gal(self, query_lower: str, field: str = "all") -> list:
         """
         GAL（グローバルアドレス一覧）から部分一致検索する。
 
         Args:
             query_lower: 小文字化済みの検索キーワード
+            field:       検索対象フィールド
 
         Returns:
             list[dict]: 見つかった連絡先リスト
@@ -123,8 +140,7 @@ class ContactSearcher:
                         # Exchange User以外の場合はAddressを使用
                         email = getattr(entry, "Address", "") or ""
 
-                    # queryがname・emailのいずれかに部分一致するか確認
-                    if query_lower in name.lower() or query_lower in email.lower():
+                    if self._matches(query_lower, field, name, email, organization):
                         results.append({
                             "name": name,
                             "email": email,
@@ -144,12 +160,13 @@ class ContactSearcher:
 
         return results
 
-    def _search_personal_contacts(self, query_lower: str) -> list:
+    def _search_personal_contacts(self, query_lower: str, field: str = "all") -> list:
         """
         個人連絡先フォルダから部分一致検索する。
 
         Args:
             query_lower: 小文字化済みの検索キーワード
+            field:       検索対象フィールド
 
         Returns:
             list[dict]: 見つかった連絡先リスト
@@ -175,8 +192,7 @@ class ContactSearcher:
                     email = getattr(item, "Email1Address", "") or ""
                     organization = getattr(item, "CompanyName", "") or ""
 
-                    # queryがname・emailのいずれかに部分一致するか確認
-                    if query_lower in name.lower() or query_lower in email.lower():
+                    if self._matches(query_lower, field, name, email, organization):
                         results.append({
                             "name": name,
                             "email": email,
